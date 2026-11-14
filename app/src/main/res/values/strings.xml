@@ -1,0 +1,44 @@
+<resources>
+    <string name="app_name">S-Cross OBD</string>
+    <string name="auth_title">S-Cross D16AA Telemetry</string>
+    <string name="auth_subtitle">Telemetria CAN-Bluetooth ELM327 per Suzuki SX4 S-Cross Diesel 2021 con sincronizzazione cloud.</string>
+    <string name="auth_feature_bt">Connessione diretta Bluetooth Classic SPP (ELM327)</string>
+    <string name="auth_feature_discovery">Rilevamento automatico PID supportati, batteria e moduli CAN</string>
+    <string name="auth_feature_cloud">Profili dashboard e PID custom sincronizzati su Google</string>
+    <string name="sign_in_with_google">Accedi con Google</string>
+    <string name="cd_app_emblem">Emblema telemetria S-Cross</string>
+
+    <string name="dashboard_header_title">S-Cross D16AA · 2021</string>
+    <string name="new_profile_chip">Nuovo</string>
+    <string name="new_profile_title">Nuovo profilo dashboard</string>
+    <string name="new_profile_label">Nome profilo</string>
+
+    <string name="connection_sheet_title">Connessione ELM327</string>
+    <string name="connection_sheet_subtitle">Bluetooth Classic SPP · CAN ISO 15765-4</string>
+    <string name="disconnect_current">Disconnetti sessione attiva</string>
+    <string name="demo_mode_title">Simulatore D16AA (Demo)</string>
+    <string name="demo_mode_desc">Prova layout, batteria e TPMS senza essere in auto</string>
+    <string name="bt_permission_needed_title">Permessi Bluetooth richiesti</string>
+    <string name="bt_permission_needed_desc">Necessari per leggere i dispositivi ELM327 associati e cercare adattatori Bluetooth Classic.</string>
+    <string name="grant_bt_permissions">Concedi permessi Bluetooth</string>
+    <string name="paired_devices_title">Dispositivi ELM327</string>
+    <string name="no_bt_devices_found">Nessun adattatore trovato. Associa l\'ELM327 dalle impostazioni Bluetooth o premi Cerca.</string>
+
+    <string name="add_widget_title">Aggiungi Widget</string>
+    <string name="pid_not_supported_ecu">Non esposto dalla ECU</string>
+    <string name="waiting_samples">In attesa di campioni live...</string>
+    <string name="tpms_configure_bcm_hint">Tocca per configurare PID/Header BCM (751 / 7A0)</string>
+
+    <string name="cd_move_left">Sposta prima</string>
+    <string name="cd_move_right">Sposta dopo</string>
+    <string name="cd_configure_widget">Configura widget</string>
+    <string name="cd_remove_widget">Rimuovi widget</string>
+    <string name="cd_battery_status">Stato batteria</string>
+    <string name="cd_toggle_logs">Mostra log ELM327</string>
+    <string name="cd_refresh">Aggiorna lista</string>
+    <string name="cd_add_widget">Aggiungi widget</string>
+    <string name="cd_delete_profile">Elimina profilo</string>
+    <string name="cd_pid_inspector">Ispettore PID e Multi-Header CAN</string>
+    <string name="cd_toggle_edit_mode">Attiva o chiudi modifica dashboard</string>
+    <string name="cd_sign_out">Esci dall\'account Google</string>
+</resources>

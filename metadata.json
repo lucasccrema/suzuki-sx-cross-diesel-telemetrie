@@ -1,0 +1,6 @@
+{
+  "name": "S-Cross OBD",
+  "description": "Telemetria CAN-Bluetooth ELM327 personalizzabile per Suzuki SX4 S-Cross Diesel D16AA con sincronizzazione cloud Google.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

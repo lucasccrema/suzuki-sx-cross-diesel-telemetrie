@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "DashboardProfile": {
+      "title": "DashboardProfile",
+      "description": "User-customized telemetry dashboard layout synced across devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the dashboard owner."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the dashboard profile (1 to 50 chars)."
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "Whether this profile loads automatically on launch."
+        },
+        "widgets": {
+          "type": "array",
+          "description": "Ordered list of widget configurations (up to 24 widgets)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "name", "isDefault", "widgets", "createdAt", "updatedAt"]
+    },
+    "CustomPidConfig": {
+      "title": "CustomPidConfig",
+      "description": "User-defined OBD-II or multi-header CAN UDS Mode 21/22 PID formula.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the owner."
+        },
+        "pidKey": {
+          "type": "string",
+          "description": "Unique key identifying the custom PID."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable sensor label."
+        },
+        "command": {
+          "type": "string",
+          "description": "Hexadecimal OBD/UDS request command (e.g. 22115B or 017C)."
+        },
+        "canHeader": {
+          "type": "string",
+          "description": "Optional CAN header for ATSH switching (e.g. 7E0, 751, 7A0)."
+        },
+        "unit": {
+          "type": "string",
+          "description": "Display unit (e.g. bar, C, g, V)."
+        },
+        "formula": {
+          "type": "string",
+          "description": "Arithmetic decoding expression using bytes A, B, C, D."
+        },
+        "minValue": {
+          "type": "number",
+          "description": "Gauge minimum scale value."
+        },
+        "maxValue": {
+          "type": "number",
+          "description": "Gauge maximum scale value."
+        },
+        "targetWheel": {
+          "type": "string",
+          "description": "Optional TPMS wheel assignment (FL, FR, RL, RR, or empty)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "pidKey",
+        "label",
+        "command",
+        "canHeader",
+        "unit",
+        "formula",
+        "minValue",
+        "maxValue",
+        "targetWheel",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/dashboards/{dashboardId}": {
+      "schema": {
+        "$ref": "#/entities/DashboardProfile"
+      },
+      "description": "User-owned custom telemetry dashboard layouts."
+    },
+    "/users/{userId}/custom_pids/{pidId}": {
+      "schema": {
+        "$ref": "#/entities/CustomPidConfig"
+      },
+      "description": "User-owned custom OBD-II/UDS CAN PIDs and TPMS wheel bindings."
+    }
+  }
+}

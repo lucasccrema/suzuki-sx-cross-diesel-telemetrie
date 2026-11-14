@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidDashboard(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.name is string &&
+             data.name.size() >= 1 &&
+             data.name.size() <= 50 &&
+             data.isDefault is bool &&
+             data.widgets is list &&
+             data.widgets.size() <= 24 &&
+             (data.widgets.size() == 0 || data.widgets[0] is map) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidCustomPid(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.pidKey is string &&
+             data.pidKey.size() >= 1 &&
+             data.pidKey.size() <= 40 &&
+             data.label is string &&
+             data.label.size() >= 1 &&
+             data.label.size() <= 50 &&
+             data.command is string &&
+             data.command.size() >= 2 &&
+             data.command.size() <= 16 &&
+             data.canHeader is string &&
+             data.canHeader.size() <= 8 &&
+             data.unit is string &&
+             data.unit.size() <= 16 &&
+             data.formula is string &&
+             data.formula.size() >= 1 &&
+             data.formula.size() <= 80 &&
+             data.minValue is number &&
+             data.maxValue is number &&
+             data.maxValue >= data.minValue &&
+             data.targetWheel is string &&
+             data.targetWheel.size() <= 8 &&
+             data.targetWheel in ['', 'FL', 'FR', 'RL', 'RR'] &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    match /users/{userId}/dashboards/{dashboardId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(dashboardId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(dashboardId) &&
+                       incoming().keys().hasAll(['userId', 'name', 'isDefault', 'widgets', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'name', 'isDefault', 'widgets', 'createdAt', 'updatedAt']) &&
+                       isValidDashboard(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(dashboardId) &&
+                       isValidDashboard(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'isDefault', 'widgets', 'updatedAt']);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(dashboardId);
+    }
+
+    match /users/{userId}/custom_pids/{pidId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(pidId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(pidId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'pidKey', 'label', 'command', 'canHeader',
+                         'unit', 'formula', 'minValue', 'maxValue', 'targetWheel',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'pidKey', 'label', 'command', 'canHeader',
+                         'unit', 'formula', 'minValue', 'maxValue', 'targetWheel',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidCustomPid(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(pidId) &&
+                       isValidCustomPid(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'pidKey', 'label', 'command', 'canHeader',
+                         'unit', 'formula', 'minValue', 'maxValue', 'targetWheel', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(pidId);
+    }
+  }
+}
