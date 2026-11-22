@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.BatteryStatusSummary
+import com.example.data.model.BcmScanEntry
+import com.example.data.model.BcmScanState
 import com.example.data.model.BluetoothDeviceItem
 import com.example.data.model.CustomPidConfig
 import com.example.data.model.DashboardProfile
@@ -14,11 +16,13 @@ import com.example.data.model.PidProbeResult
 import com.example.data.model.SupportedPidSnapshot
 import com.example.data.model.TelemetryReading
 import com.example.data.model.TpmsWheelReading
+import com.example.data.model.WheelPosition
 import com.example.data.model.WidgetStyle
 import com.example.data.obd.D16aaPidCatalog
 import com.example.data.obd.Elm327TelemetryRepository
 import com.example.data.repository.DashboardRepository
 import com.google.firebase.firestore.FirebaseFirestoreException
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -70,6 +74,7 @@ class TelemetryDashboardViewModel(
   val statusBannerMessage: StateFlow<String?> = _statusBannerMessage.asStateFlow()
 
   private var scanJob: Job? = null
+  private var bcmScanJob: Job? = null
 
   val dashboardsState: StateFlow<DashboardsUiState> =
     dashboardRepository
@@ -128,6 +133,7 @@ class TelemetryDashboardViewModel(
   val batterySummary: StateFlow<BatteryStatusSummary> = telemetryRepository.batterySummary
   val tpmsReadings: StateFlow<List<TpmsWheelReading>> = telemetryRepository.tpmsReadings
   val elmLogs: StateFlow<List<ElmLogEntry>> = telemetryRepository.bluetoothClient.logs
+  val bcmScanState: StateFlow<BcmScanState> = telemetryRepository.bcmScanState
 
   init {
     viewModelScope.launch {
@@ -389,6 +395,116 @@ class TelemetryDashboardViewModel(
     }
   }
 
+  fun startBcmAndDpfScan() {
+    if (bcmScanState.value.isScanning) return
+    bcmScanJob?.cancel()
+    bcmScanJob =
+      viewModelScope.launch {
+        telemetryRepository.scanBcmAndExtendedPids()
+      }
+  }
+
+  fun startTpmsMenuSniff() {
+    if (bcmScanState.value.isScanning) return
+    bcmScanJob?.cancel()
+    bcmScanJob =
+      viewModelScope.launch {
+        telemetryRepository.sniffTpmsMenuTraffic()
+      }
+  }
+
+  fun applyTpmsCandidateToWheels(entry: BcmScanEntry) {
+    if (entry.command.equals("PASSIVE", ignoreCase = true)) return
+    val candidate = entry.tpmsCandidate ?: return
+    if (candidate.formulaPerWheel.size < 4) return
+
+    viewModelScope.launch {
+      runCatching {
+        val existingWheelPids = customPids.value.filter { it.targetWheel.isNotBlank() }
+        existingWheelPids.forEach { old ->
+          if (old.id.isNotBlank()) {
+            dashboardRepository.deleteCustomPid(currentUserId, old.id)
+          }
+        }
+        WheelPosition.entries.forEachIndexed { idx, wheel ->
+          val config =
+            CustomPidConfig(
+              userId = currentUserId,
+              pidKey = "TPMS_${wheel.code}_${shortId().uppercase(Locale.ROOT)}",
+              label = "TPMS ${wheel.labelIt}",
+              command = entry.command.uppercase(Locale.ROOT).take(16),
+              canHeader = entry.fullHeaderSpec.uppercase(Locale.ROOT).take(8),
+              unit = "bar",
+              formula = candidate.formulaPerWheel[idx].take(80),
+              minValue = 0.0,
+              maxValue = 4.0,
+              targetWheel = wheel.code,
+            )
+          dashboardRepository.saveCustomPid(currentUserId, config)
+        }
+        _statusBannerMessage.value =
+          "TPMS applicato alle 4 ruote (${entry.fullHeaderSpec} · ${entry.command})"
+      }.onFailure {
+        _statusBannerMessage.value = it.localizedMessage ?: "Errore configurazione ruote TPMS"
+      }
+    }
+  }
+
+  fun buildBcmScanClipboardReport(): String {
+    val snapshot = supportedPids.value
+    val scan = bcmScanState.value
+    val curReadings = readings.value
+    val ecuV = curReadings["BATTERY_ECU"]?.value?.let { String.format(Locale.ROOT, "%.2fV", it) } ?: "N/D"
+    val atrvV = curReadings["BATTERY_ATRV"]?.value?.let { String.format(Locale.ROOT, "%.2fV", it) } ?: "N/D"
+    val scanStatus =
+      when {
+        !scan.hasRun -> "NON ESEGUITA (tocca prima 'Cerca moduli BCM / TPMS')"
+        scan.isScanning -> "IN CORSO (${scan.completedProbes}/${scan.totalProbes})"
+        else -> "COMPLETATA (${scan.completedProbes}/${scan.totalProbes})"
+      }
+
+    return buildString {
+      appendLine("=== S-Cross D16AA CAN Report ===")
+      appendLine("Protocollo: ${snapshot.protocolName.ifBlank { scan.protocolName }.ifBlank { "N/D" }}")
+      appendLine("ECU (090A): ${snapshot.ecuName.ifBlank { scan.ecuInfo }.ifBlank { "N/D" }}")
+      appendLine("Batteria: 0142=$ecuV | ATRV=$atrvV")
+      appendLine("Mode 01 supportati (${snapshot.supportedCommands.size}): ${snapshot.supportedCommands.sorted().joinToString(" ")}")
+      appendLine("Stato scansione BCM: $scanStatus")
+      scan.errorMessage?.let { appendLine("Errore scansione: $it") }
+      appendLine()
+      appendLine("--- Risposte moduli estesi (${scan.foundEntries.size}) ---")
+      if (scan.foundEntries.isEmpty()) {
+        appendLine("Nessuna risposta positiva.")
+      } else {
+        scan.foundEntries.forEach { e ->
+          val hex = e.parsedBytes.joinToString(" ") { String.format(Locale.ROOT, "%02X", it) }
+          appendLine("[${e.categoryHint}] ${e.fullHeaderSpec} -> ${e.command}")
+          appendLine("  Bytes: $hex")
+          appendLine("  Raw: ${e.rawResponse.replace("\n", " | ")}")
+          e.tpmsCandidate?.let { cand ->
+            val bars = cand.samplePressuresBar.joinToString(" / ") { String.format(Locale.ROOT, "%.2f", it) }
+            appendLine("  TPMS Candidate (${cand.scaleLabel}): $bars bar | formule=${cand.formulaPerWheel.joinToString(",")}")
+          }
+        }
+      }
+      if (scan.scanTrace.isNotEmpty()) {
+        appendLine()
+        appendLine("--- Traccia scansione CAN (${scan.scanTrace.size}) ---")
+        scan.scanTrace.forEach { appendLine(it) }
+      }
+      val logTail = elmLogs.value.takeLast(25)
+      if (logTail.isNotEmpty()) {
+        appendLine()
+        appendLine("--- Ultimi log ELM327 ---")
+        logTail.forEach { l -> appendLine("[${l.direction}] ${l.message}") }
+      }
+    }.trim()
+  }
+
+  fun notifyReportCopied() {
+    _statusBannerMessage.value = "Report scansione copiato negli appunti."
+  }
+
   fun clearElmLogs() {
     telemetryRepository.bluetoothClient.clearLogs()
   }
@@ -396,6 +512,7 @@ class TelemetryDashboardViewModel(
   override fun onCleared() {
     super.onCleared()
     scanJob?.cancel()
+    bcmScanJob?.cancel()
   }
 
   private fun shortId(): String = UUID.randomUUID().toString().replace("-", "").take(8)

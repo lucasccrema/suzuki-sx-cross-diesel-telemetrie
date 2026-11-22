@@ -174,3 +174,36 @@ data class PidProbeResult(
   val decodedValue: Double?,
   val errorMessage: String? = null,
 )
+
+data class TpmsByteCandidate(
+  val formulaPerWheel: List<String>,
+  val samplePressuresBar: List<Double>,
+  val scaleLabel: String,
+)
+
+data class BcmScanEntry(
+  val txHeader: String,
+  val rxFilter: String,
+  val command: String,
+  val rawResponse: String,
+  val parsedBytes: List<Int>,
+  val categoryHint: String,
+  val tpmsCandidate: TpmsByteCandidate? = null,
+) {
+  val fullHeaderSpec: String
+    get() = if (rxFilter.isNotBlank()) "$txHeader:$rxFilter" else txHeader
+}
+
+data class BcmScanState(
+  val isScanning: Boolean = false,
+  val currentStepLabel: String = "",
+  val progressFraction: Float = 0f,
+  val totalProbes: Int = 0,
+  val completedProbes: Int = 0,
+  val ecuInfo: String = "",
+  val protocolName: String = "",
+  val foundEntries: List<BcmScanEntry> = emptyList(),
+  val scanTrace: List<String> = emptyList(),
+  val errorMessage: String? = null,
+  val hasRun: Boolean = false,
+)

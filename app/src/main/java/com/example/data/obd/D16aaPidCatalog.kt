@@ -475,6 +475,51 @@ object D16aaPidCatalog {
     return bytes
   }
 
+  /**
+   * Parses an ELM327 response received with ATH1 (headers ON) and ATS0 (spaces OFF).
+   * Returns (respondingCanHeader, parsedPayloadBytes).
+   */
+  fun parseHeaderedElmResponse(
+    rawResponse: String,
+    command: String,
+    is29Bit: Boolean = false,
+  ): Pair<String, List<Int>> {
+    val cleaned = rawResponse.uppercase(Locale.ROOT).trim()
+    if (
+      cleaned.isEmpty() ||
+        cleaned.contains("NO DATA") ||
+        cleaned.contains("UNABLE TO CONNECT") ||
+        cleaned.contains("CAN ERROR") ||
+        cleaned.contains("ERROR") ||
+        cleaned.contains("?") ||
+        cleaned.contains("STOPPED")
+    ) {
+      return "" to emptyList()
+    }
+
+    val headerLen = if (is29Bit) 8 else 3
+    val lines =
+      cleaned.lines()
+        .map { it.replace(Regex("[^0-9A-F]"), "") }
+        .filter { it.length > headerLen + 2 }
+    if (lines.isEmpty()) return "" to emptyList()
+
+    val rxHeader = lines.first().substring(0, headerLen)
+    val strippedFrames =
+      lines.mapNotNull { hex ->
+        val body = if (hex.length > headerLen) hex.substring(headerLen) else return@mapNotNull null
+        when {
+          body.startsWith("0") && body.length >= 2 -> body.substring(2)
+          body.startsWith("1") && body.length >= 4 -> body.substring(4)
+          body.startsWith("2") && body.length >= 2 -> body.substring(2)
+          else -> body
+        }
+      }.joinToString("")
+
+    val payloadBytes = parseElmHexBytes(strippedFrames, command)
+    return rxHeader to payloadBytes
+  }
+
   fun parseAtrvVoltage(rawResponse: String): Double? {
     val match = Regex("(\\d+(?:\\.\\d+)?)\\s*V?", RegexOption.IGNORE_CASE).find(rawResponse)
     return match?.groupValues?.getOrNull(1)?.toDoubleOrNull()
@@ -490,11 +535,150 @@ object D16aaPidCatalog {
     val b = bytes.getOrElse(1) { 0 }.toDouble()
     val c = bytes.getOrElse(2) { 0 }.toDouble()
     val d = bytes.getOrElse(3) { 0 }.toDouble()
+    val e = bytes.getOrElse(4) { 0 }.toDouble()
+    val f = bytes.getOrElse(5) { 0 }.toDouble()
+    val g = bytes.getOrElse(6) { 0 }.toDouble()
+    val h = bytes.getOrElse(7) { 0 }.toDouble()
 
     return try {
-      FormulaParser(formula, a, b, c, d).parse()
+      FormulaParser(formula, a, b, c, d, e, f, g, h).parse()
     } catch (_: Exception) {
       null
+    }
+  }
+
+  /**
+   * Splits a header spec like "751:7A0" or "751" into (txHeader, optionalRxFilter).
+   */
+  fun parseHeaderSpec(canHeaderSpec: String): Pair<String, String> {
+    val clean = canHeaderSpec.uppercase(Locale.ROOT).trim()
+    if (!clean.contains(":")) return clean to ""
+    val parts = clean.split(":", limit = 2)
+    return parts[0].trim() to parts[1].trim()
+  }
+
+  /**
+   * Checks whether 4 consecutive payload bytes look like realistic tire pressures (1.6 - 3.6 bar)
+   * under common TPMS byte scalings (kPa*2 -> 0.02 bar, kPa*1.25 -> 0.0125, kPa -> 0.01, psi/4).
+   */
+  fun detectTpmsCandidate(bytes: List<Int>): com.example.data.model.TpmsByteCandidate? {
+    if (bytes.size < 4) return null
+    val scales =
+      listOf(
+        0.02 to "*0.02 (2 kPa/bit)",
+        0.025 to "*0.025 (2.5 kPa/bit)",
+        0.01373 to "*0.01373 (0.2 PSI/bit)",
+        0.01 to "*0.01 (1 kPa/bit)",
+      )
+    val varNames = listOf("A", "B", "C", "D", "E", "F", "G", "H")
+    val maxOffset = (bytes.size - 4).coerceAtMost(4)
+    for (offset in 0..maxOffset) {
+      val slice = bytes.subList(offset, offset + 4)
+      for ((factor, label) in scales) {
+        val pressures = slice.map { it * factor }
+        if (pressures.all { it in 1.65..3.55 } && pressures.distinct().size >= 1) {
+          val formulas = (0..3).map { idx -> "${varNames[offset + idx]}${factorString(factor)}" }
+          return com.example.data.model.TpmsByteCandidate(
+            formulaPerWheel = formulas,
+            samplePressuresBar = pressures,
+            scaleLabel = "Offset +$offset $label",
+          )
+        }
+      }
+    }
+    return null
+  }
+
+  private fun factorString(factor: Double): String =
+    when (factor) {
+      0.02 -> "*0.02"
+      0.025 -> "*0.025"
+      0.01373 -> "*0.01373"
+      else -> "*0.01"
+    }
+
+  data class PassiveCanSummary(
+    val canId: String,
+    val frameCount: Int,
+    val sampleHex: String,
+    val sampleBytes: List<Int>,
+    val tpmsCandidate: com.example.data.model.TpmsByteCandidate?,
+    val distinctPayloadsCount: Int = 1,
+    val extraSampleHex: String? = null,
+  )
+
+  fun summarizePassiveCanFrames(rawLines: List<String>): List<PassiveCanSummary> {
+    data class Acc(
+      var count: Int,
+      val firstHex: String,
+      val firstBytes: List<Int>,
+      val distinctHexes: MutableList<String>,
+      var tpmsSampleHex: String?,
+      var tpmsSampleBytes: List<Int>?,
+      var tpmsCandidate: com.example.data.model.TpmsByteCandidate?,
+    )
+    val grouped = linkedMapOf<String, Acc>()
+    for (line in rawLines) {
+      val upper = line.uppercase(Locale.ROOT).trim()
+      if (
+        upper.isEmpty() ||
+          upper.contains("ERROR") ||
+          upper.contains("STOPPED") ||
+          upper.contains("BUFFER") ||
+          upper.contains("NO DATA") ||
+          upper.contains("?")
+      ) {
+        continue
+      }
+      val hex = upper.replace(Regex("[^0-9A-F]"), "")
+      // Standard 11-bit CAN frame under ATH1+ATS0: 3 hex CAN ID + 1..8 payload bytes (2..16 hex chars)
+      if (hex.length < 5 || hex.length > 19 || (hex.length - 3) % 2 != 0) continue
+      val canId = hex.substring(0, 3)
+      val payloadHex = hex.substring(3)
+      val bytes = mutableListOf<Int>()
+      var i = 0
+      while (i + 1 < payloadHex.length) {
+        bytes.add(payloadHex.substring(i, i + 2).toInt(16))
+        i += 2
+      }
+      val existing = grouped[canId]
+      if (existing != null) {
+        existing.count += 1
+        if (payloadHex !in existing.distinctHexes && existing.distinctHexes.size < 6) {
+          existing.distinctHexes.add(payloadHex)
+        }
+        if (existing.tpmsCandidate == null) {
+          val cand = detectTpmsCandidate(bytes)
+          if (cand != null) {
+            existing.tpmsCandidate = cand
+            existing.tpmsSampleHex = payloadHex
+            existing.tpmsSampleBytes = bytes
+          }
+        }
+      } else {
+        val cand = detectTpmsCandidate(bytes)
+        grouped[canId] =
+          Acc(
+            count = 1,
+            firstHex = payloadHex,
+            firstBytes = bytes,
+            distinctHexes = mutableListOf(payloadHex),
+            tpmsSampleHex = if (cand != null) payloadHex else null,
+            tpmsSampleBytes = if (cand != null) bytes else null,
+            tpmsCandidate = cand,
+          )
+      }
+    }
+    return grouped.entries.map { (canId, acc) ->
+      PassiveCanSummary(
+        canId = canId,
+        frameCount = acc.count,
+        sampleHex = acc.tpmsSampleHex ?: acc.firstHex,
+        sampleBytes = acc.tpmsSampleBytes ?: acc.firstBytes,
+        tpmsCandidate = acc.tpmsCandidate,
+        distinctPayloadsCount = acc.distinctHexes.size,
+        extraSampleHex = acc.distinctHexes.getOrNull(1),
+      )
     }
   }
 
@@ -504,6 +688,10 @@ object D16aaPidCatalog {
     private val b: Double,
     private val c: Double,
     private val d: Double,
+    private val e: Double,
+    private val f: Double,
+    private val g: Double,
+    private val h: Double,
   ) {
     private val expr = input.replace(" ", "").uppercase(Locale.ROOT)
     private var pos = 0
@@ -567,13 +755,17 @@ object D16aaPidCatalog {
         if (pos < expr.length && expr[pos] == ')') pos++
         return x
       }
-      if (pos < expr.length && expr[pos] in listOf('A', 'B', 'C', 'D')) {
+      if (pos < expr.length && expr[pos] in listOf('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H')) {
         val ch = expr[pos++]
         return when (ch) {
           'A' -> a
           'B' -> b
           'C' -> c
-          else -> d
+          'D' -> d
+          'E' -> e
+          'F' -> f
+          'G' -> g
+          else -> h
         }
       }
       val start = pos

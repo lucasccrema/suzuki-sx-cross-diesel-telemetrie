@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,9 +28,11 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -39,6 +43,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -61,6 +66,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.model.BcmScanEntry
+import com.example.data.model.BcmScanState
 import com.example.data.model.BluetoothDeviceItem
 import com.example.data.model.CustomPidConfig
 import com.example.data.model.DashboardWidgetConfig
@@ -575,14 +582,19 @@ fun WidgetConfigDialog(
   )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PidInspectorSheet(
   supportedPids: SupportedPidSnapshot,
   customPids: List<CustomPidConfig>,
   probeResult: PidProbeResult?,
   isProbing: Boolean,
+  bcmScanState: BcmScanState,
   onRescanPids: () -> Unit,
+  onStartBcmScan: () -> Unit,
+  onStartTpmsMenuSniff: () -> Unit,
+  onApplyTpmsCandidate: (BcmScanEntry) -> Unit,
+  onCopyBcmReport: () -> Unit,
   onProbeCommand: (canHeader: String, command: String, formula: String) -> Unit,
   onSaveCustomPid: (
     label: String,
@@ -649,15 +661,214 @@ fun PidInspectorSheet(
         )
       }
 
+      // Scansione automatica BCM / TPMS / DPF
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = SurfaceElevated,
+        border = BorderStroke(1.dp, CyanPrimary.copy(alpha = 0.45f)),
+      ) {
+        Column(
+          modifier = Modifier.padding(14.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Text(
+            text = stringResource(R.string.bcm_scan_card_title),
+            style = MaterialTheme.typography.titleMedium,
+          )
+          Text(
+            text = stringResource(R.string.bcm_scan_card_desc),
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+          )
+
+          Button(
+            onClick = onStartBcmScan,
+            enabled = !bcmScanState.isScanning,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("scan_bcm_tpms_button"),
+          ) {
+            if (bcmScanState.isScanning) {
+              CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = VoidBlack,
+              )
+              Spacer(Modifier.size(8.dp))
+              Text(stringResource(R.string.bcm_scan_running))
+            } else {
+              Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(Modifier.size(8.dp))
+              Text(stringResource(R.string.bcm_scan_button))
+            }
+          }
+
+          OutlinedButton(
+            onClick = onStartTpmsMenuSniff,
+            enabled = !bcmScanState.isScanning,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("sniff_tpms_menu_button"),
+            border = BorderStroke(1.dp, EmeraldOptimal.copy(alpha = 0.65f)),
+          ) {
+            Icon(Icons.Rounded.Terminal, contentDescription = null, modifier = Modifier.size(18.dp), tint = EmeraldOptimal)
+            Spacer(Modifier.size(8.dp))
+            Text(stringResource(R.string.tpms_menu_sniff_button), color = EmeraldOptimal)
+          }
+
+          Text(
+            text = stringResource(R.string.tpms_menu_sniff_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+          )
+
+          if (bcmScanState.isScanning) {
+            LinearProgressIndicator(
+              progress = { bcmScanState.progressFraction.coerceIn(0f, 1f) },
+              modifier = Modifier.fillMaxWidth(),
+              color = CyanPrimary,
+              trackColor = VoidBlack,
+            )
+            Text(
+              text = "${bcmScanState.completedProbes}/${bcmScanState.totalProbes} · ${bcmScanState.currentStepLabel}",
+              style = MaterialTheme.typography.labelSmall,
+              color = CyanPrimary,
+            )
+          }
+
+          bcmScanState.errorMessage?.let { err ->
+            Text(
+              text = err,
+              style = MaterialTheme.typography.labelSmall,
+              color = AmberWarning,
+            )
+          }
+
+          if (bcmScanState.hasRun && !bcmScanState.isScanning) {
+            if (bcmScanState.foundEntries.isEmpty() && bcmScanState.errorMessage == null) {
+              Text(
+                text = stringResource(R.string.bcm_scan_empty_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+              )
+            } else if (bcmScanState.foundEntries.isNotEmpty()) {
+              Text(
+                text = "Risposte rilevate (${bcmScanState.foundEntries.size}):",
+                style = MaterialTheme.typography.labelMedium,
+                color = EmeraldOptimal,
+              )
+              bcmScanState.foundEntries.forEachIndexed { idx, entry ->
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  shape = MaterialTheme.shapes.small,
+                  color = VoidBlack,
+                  border =
+                    BorderStroke(
+                      1.dp,
+                      if (entry.tpmsCandidate != null) EmeraldOptimal.copy(alpha = 0.6f)
+                      else BorderHairline,
+                    ),
+                ) {
+                  Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    Text(
+                      text = "${entry.categoryHint} · ${entry.fullHeaderSpec} -> ${entry.command}",
+                      style = MaterialTheme.typography.labelMedium,
+                      color = CyanPrimary,
+                    )
+                    Text(
+                      text =
+                        "Byte: ${
+                          entry.parsedBytes.joinToString(" ") {
+                            String.format(Locale.ROOT, "%02X", it)
+                          }
+                        }",
+                      style = TelemetryNumericStyle.copy(fontSize = MaterialTheme.typography.labelSmall.fontSize),
+                      color = TextSecondary,
+                    )
+                    entry.tpmsCandidate?.let { cand ->
+                      val bars =
+                        cand.samplePressuresBar.joinToString(" / ") {
+                          String.format(Locale.ROOT, "%.2f", it)
+                        }
+                      Text(
+                        text = "Candidato TPMS (${cand.scaleLabel}): $bars bar",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EmeraldOptimal,
+                      )
+                      if (entry.command != "PASSIVE") {
+                        Button(
+                          onClick = { onApplyTpmsCandidate(entry) },
+                          modifier =
+                            Modifier.fillMaxWidth()
+                              .heightIn(min = 48.dp)
+                              .testTag("apply_tpms_candidate_$idx"),
+                          colors =
+                            ButtonDefaults.buttonColors(
+                              containerColor = EmeraldOptimal,
+                              contentColor = VoidBlack,
+                            ),
+                        ) {
+                          Text(stringResource(R.string.bcm_apply_tpms_4_wheels))
+                        }
+                      } else {
+                        Text(
+                          text = "Frame CAN passivo rilevato: copia il report per configurare l'ascolto continuo.",
+                          style = MaterialTheme.typography.labelSmall,
+                          color = CyanPrimary,
+                        )
+                      }
+                    }
+                    if (entry.command != "PASSIVE") {
+                      TextButton(
+                        onClick = {
+                          canHeader = entry.fullHeaderSpec
+                          command = entry.command
+                          if (entry.tpmsCandidate != null) {
+                            formula = entry.tpmsCandidate.formulaPerWheel.firstOrNull() ?: "A*0.02"
+                            unit = "bar"
+                            label = "TPMS (${entry.fullHeaderSpec})"
+                          } else {
+                            formula = "A"
+                            label = "${entry.categoryHint} ${entry.command}".take(36)
+                          }
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("use_scan_entry_$idx"),
+                      ) {
+                        Text(stringResource(R.string.bcm_use_in_form))
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          if (bcmScanState.hasRun || supportedPids.discoveryCompleted) {
+            OutlinedButton(
+              onClick = onCopyBcmReport,
+              enabled = !bcmScanState.isScanning,
+              modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("copy_bcm_report_button"),
+            ) {
+              Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(Modifier.size(8.dp))
+              Text(stringResource(R.string.bcm_copy_report))
+            }
+          }
+        }
+      }
+
       HorizontalDivider(color = BorderHairline)
       Text("Test & Creazione PID (Motore / DPF / BCM TPMS)", style = MaterialTheme.typography.titleMedium)
 
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("7DF", "7E0", "751", "7A0").forEach { preset ->
+      FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+      ) {
+        listOf("7DF", "7E0", "751", "751:7A0", "7A0").forEach { preset ->
           FilterChip(
             selected = canHeader.equals(preset, ignoreCase = true),
             onClick = { canHeader = preset },
-            label = { Text("ATSH $preset", style = MaterialTheme.typography.labelSmall) },
+            label = { Text(preset, style = MaterialTheme.typography.labelSmall) },
           )
         }
       }
@@ -665,8 +876,8 @@ fun PidInspectorSheet(
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
           value = canHeader,
-          onValueChange = { canHeader = it.uppercase(Locale.ROOT).take(6) },
-          label = { Text("Header CAN") },
+          onValueChange = { canHeader = it.uppercase(Locale.ROOT).take(8) },
+          label = { Text("Header TX[:RX]") },
           singleLine = true,
           modifier = Modifier.weight(1f),
         )
@@ -691,7 +902,7 @@ fun PidInspectorSheet(
         OutlinedTextField(
           value = formula,
           onValueChange = { formula = it },
-          label = { Text("Formula (A, B, C, D)") },
+          label = { Text("Formula (A..H)") },
           singleLine = true,
           modifier = Modifier.weight(1.6f),
         )

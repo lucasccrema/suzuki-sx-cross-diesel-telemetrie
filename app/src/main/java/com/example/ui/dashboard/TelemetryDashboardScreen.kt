@@ -1,5 +1,8 @@
 package com.example.ui.dashboard
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -135,6 +138,7 @@ fun TelemetryDashboardRoute(
   val elmLogs by viewModel.elmLogs.collectAsStateWithLifecycle()
   val probeResult by viewModel.probeResult.collectAsStateWithLifecycle()
   val isProbing by viewModel.isProbing.collectAsStateWithLifecycle()
+  val bcmScanState by viewModel.bcmScanState.collectAsStateWithLifecycle()
   val statusBannerMessage by viewModel.statusBannerMessage.collectAsStateWithLifecycle()
 
   var showConnectionSheet by remember { mutableStateOf(false) }
@@ -392,7 +396,18 @@ fun TelemetryDashboardRoute(
       customPids = customPids,
       probeResult = probeResult,
       isProbing = isProbing,
+      bcmScanState = bcmScanState,
       onRescanPids = { viewModel.rescanSupportedPids() },
+      onStartBcmScan = { viewModel.startBcmAndDpfScan() },
+      onStartTpmsMenuSniff = { viewModel.startTpmsMenuSniff() },
+      onApplyTpmsCandidate = { entry -> viewModel.applyTpmsCandidateToWheels(entry) },
+      onCopyBcmReport = {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        clipboard?.setPrimaryClip(
+          ClipData.newPlainText("S-Cross CAN Report", viewModel.buildBcmScanClipboardReport())
+        )
+        viewModel.notifyReportCopied()
+      },
       onProbeCommand = { h, c, f -> viewModel.probeCustomCommand(h, c, f) },
       onSaveCustomPid = { label, cmd, hdr, unit, formula, min, max, wheel, add ->
         viewModel.saveCustomPid(label, cmd, hdr, unit, formula, min, max, wheel, add)

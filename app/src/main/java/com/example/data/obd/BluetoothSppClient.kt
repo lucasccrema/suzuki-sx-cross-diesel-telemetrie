@@ -20,6 +20,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -250,25 +251,146 @@ class BluetoothSppClient(context: Context) {
         out.write((cleanCmd + "\r").toByteArray(Charsets.US_ASCII))
         out.flush()
 
+        val builder = StringBuilder()
         val response =
-          withTimeout(timeoutMs) {
-            val builder = StringBuilder()
-            val buffer = ByteArray(128)
-            while (true) {
-              if (inp.available() > 0) {
-                val count = inp.read(buffer)
-                if (count < 0) throw IOException("Connessione chiusa dall'adattatore")
-                val chunk = String(buffer, 0, count, Charsets.US_ASCII)
-                builder.append(chunk)
-                if (chunk.contains('>')) break
-              } else {
-                delay(15L)
+          try {
+            withTimeout(timeoutMs) {
+              val buffer = ByteArray(128)
+              while (true) {
+                if (inp.available() > 0) {
+                  val count = inp.read(buffer)
+                  if (count < 0) throw IOException("Connessione chiusa dall'adattatore")
+                  val chunk = String(buffer, 0, count, Charsets.US_ASCII)
+                  builder.append(chunk)
+                  if (chunk.contains('>')) break
+                } else {
+                  delay(15L)
+                }
               }
+              builder.toString().replace(">", "").replace("\r", "\n").trim()
             }
-            builder.toString().replace(">", "").replace("\r", "\n").trim()
+          } catch (t: TimeoutCancellationException) {
+            val partial = builder.toString().replace("\r", " ").trim().take(80)
+            appendLog("TO", "$cleanCmd (${timeoutMs}ms): ${partial.ifBlank { "nessun byte" }}")
+            throw t
+          } catch (io: IOException) {
+            appendLog("ERR", "$cleanCmd: ${io.message ?: "errore I/O"}")
+            throw io
           }
         appendLog("RX", response.replace("\n", " | ").take(120))
         response
+      }
+    }
+
+  data class CanMonitorCapture(
+    val lines: List<String>,
+    val hitBufferFull: Boolean,
+    val timedOutPrompt: Boolean,
+  )
+
+  suspend fun monitorCanBriefly(
+    durationMs: Long = 220L,
+    maxLines: Int = 35,
+    maxBytes: Int = 8000,
+  ): CanMonitorCapture =
+    withContext(Dispatchers.IO) {
+      commandMutex.withLock {
+        val out = outputStream ?: throw IOException("Socket non connesso")
+        val inp = inputStream ?: throw IOException("Stream ingresso non disponibile")
+
+        while (inp.available() > 0) {
+          inp.read()
+        }
+
+        appendLog("TX", "ATMA (${durationMs}ms)")
+        out.write("ATMA\r".toByteArray(Charsets.US_ASCII))
+        out.flush()
+
+        val builder = StringBuilder()
+        val startMs = System.currentTimeMillis()
+        val buffer = ByteArray(256)
+        var stoppedByPrompt = false
+        var timedOutPrompt = false
+
+        try {
+          while (System.currentTimeMillis() - startMs < durationMs) {
+            if (inp.available() > 0) {
+              val count = inp.read(buffer)
+              if (count < 0) break
+              val chunk = String(buffer, 0, count, Charsets.US_ASCII)
+              builder.append(chunk)
+              if (chunk.contains('>')) {
+                stoppedByPrompt = true
+                break
+              }
+              val approxLines = builder.count { it == '\r' || it == '\n' }
+              if (
+                approxLines >= maxLines ||
+                  builder.length >= maxBytes ||
+                  builder.contains("BUFFER FULL", ignoreCase = true) ||
+                  builder.contains("STOPPED", ignoreCase = true)
+              ) {
+                break
+              }
+            } else {
+              delay(10L)
+            }
+          }
+        } finally {
+          if (!stoppedByPrompt) {
+            runCatching {
+              out.write("\r".toByteArray(Charsets.US_ASCII))
+              out.flush()
+            }
+            val stopDeadline = System.currentTimeMillis() + 1200L
+            var retriedStop = false
+            var gotPromptAfterStop = false
+            while (System.currentTimeMillis() < stopDeadline) {
+              if (inp.available() > 0) {
+                val count = inp.read(buffer)
+                if (count < 0) break
+                val chunk = String(buffer, 0, count, Charsets.US_ASCII)
+                if (chunk.contains('>')) {
+                  gotPromptAfterStop = true
+                  break
+                }
+              } else {
+                if (!retriedStop && System.currentTimeMillis() - startMs > durationMs + 400L) {
+                  retriedStop = true
+                  runCatching {
+                    out.write("\r".toByteArray(Charsets.US_ASCII))
+                    out.flush()
+                  }
+                }
+                delay(15L)
+              }
+            }
+            timedOutPrompt = !gotPromptAfterStop
+            while (inp.available() > 0) {
+              inp.read()
+            }
+          }
+        }
+
+        val rawText = builder.toString()
+        val hitBufferFull = rawText.contains("BUFFER FULL", ignoreCase = true)
+        val lines =
+          rawText
+            .replace(">", "")
+            .replace("\r", "\n")
+            .lines()
+            .map { it.trim() }
+            .filter { line ->
+              line.isNotEmpty() &&
+                !line.equals("ATMA", ignoreCase = true) &&
+                !line.contains("STOPPED", ignoreCase = true) &&
+                !line.contains("BUFFER FULL", ignoreCase = true) &&
+                !line.contains("SEARCHING", ignoreCase = true)
+            }
+            .take(maxLines)
+
+        appendLog("RX", "ATMA: ${lines.size} frame${if (hitBufferFull) " (BUF FULL)" else ""}")
+        CanMonitorCapture(lines = lines, hitBufferFull = hitBufferFull, timedOutPrompt = timedOutPrompt)
       }
     }
 

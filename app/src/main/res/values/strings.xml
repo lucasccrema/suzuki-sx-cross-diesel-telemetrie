@@ -29,6 +29,17 @@
     <string name="waiting_samples">In attesa di campioni live...</string>
     <string name="tpms_configure_bcm_hint">Tocca per configurare PID/Header BCM (751 / 7A0)</string>
 
+    <string name="bcm_scan_card_title">Scansione Auto BCM / TPMS &amp; DPF</string>
+    <string name="bcm_scan_card_desc">Interroga in sola lettura i moduli Suzuki (751, 751:7A0, 7A0, 750, 740, 7B0, 7C0) e la ECU motore D16AA (7E0 Mode 22).</string>
+    <string name="bcm_scan_button">Cerca moduli BCM / TPMS</string>
+    <string name="bcm_scan_running">Scansione moduli in corso...</string>
+    <string name="bcm_scan_empty_hint">Nessun dato TPMS/BCM ricevuto ora. Sulla S-Cross i sensori ruota vanno in sleep da fermo e trasmettono solo in movimento oltre 25-30 km/h; puoi copiare il report qui sotto per analizzarlo da casa.</string>
+    <string name="bcm_apply_tpms_4_wheels">Applica alle 4 ruote</string>
+    <string name="bcm_use_in_form">Usa nel form</string>
+    <string name="bcm_copy_report">Copia Report Scansione</string>
+    <string name="tpms_menu_sniff_button">Intercetta Menu TPMS (Auto ferma)</string>
+    <string name="tpms_menu_sniff_hint">Con auto ferma: tocca qui e aziona subito l\'astina del cruscotto per aprire la voce TPMS durante i ~7 secondi di ascolto CAN.</string>
+
     <string name="cd_move_left">Sposta prima</string>
     <string name="cd_move_right">Sposta dopo</string>
     <string name="cd_configure_widget">Configura widget</string>
