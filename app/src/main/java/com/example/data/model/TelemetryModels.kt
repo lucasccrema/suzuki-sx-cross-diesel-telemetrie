@@ -1,5 +1,6 @@
 package com.example.data.model
 
+import androidx.annotation.Keep
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
@@ -207,3 +208,70 @@ data class BcmScanState(
   val errorMessage: String? = null,
   val hasRun: Boolean = false,
 )
+
+@Keep
+@IgnoreExtraProperties
+data class TripTimelinePoint(
+  val elapsedSec: Long = 0L,
+  val speedKmh: Double = 0.0,
+  val rpm: Double = 0.0,
+  val coolantC: Double = 0.0,
+  val dpfTempC: Double = 0.0,
+  val batteryV: Double = 0.0,
+  val fuelLph: Double = 0.0,
+)
+
+@Keep
+@IgnoreExtraProperties
+data class TripLogEntry(
+  @DocumentId val id: String = "",
+  val userId: String = "",
+  val title: String = "",
+  val startedAtMillis: Long = 0L,
+  val endedAtMillis: Long = 0L,
+  val durationSec: Long = 0L,
+  val sampleCount: Long = 0L,
+  val distanceKm: Double = 0.0,
+  val avgSpeedKmh: Double = 0.0,
+  val maxSpeedKmh: Double = 0.0,
+  val maxRpm: Double = 0.0,
+  val maxCoolantC: Double = 0.0,
+  val maxDpfTempC: Double = 0.0,
+  val minBatteryV: Double = 0.0,
+  val maxBatteryV: Double = 0.0,
+  val avgBatteryV: Double = 0.0,
+  val maxTurboKpa: Double = 0.0,
+  val estimatedFuelLiters: Double = 0.0,
+  val avgLitersPer100Km: Double = 0.0,
+  val avgLitersPerHour: Double = 0.0,
+  val trafficSeconds: Long = 0L,
+  val dpfRegenDetected: Boolean = false,
+  val dpfRegenSeconds: Long = 0L,
+  val csvFileName: String = "",
+  val status: String = "COMPLETED",
+  val demoMode: Boolean = false,
+  val timelinePoints: List<TripTimelinePoint> = emptyList(),
+  @ServerTimestamp val createdAt: Timestamp? = null,
+  @ServerTimestamp val updatedAt: Timestamp? = null,
+)
+
+data class ActiveTripUiState(
+  val isRecording: Boolean = false,
+  val tripId: String? = null,
+  val title: String = "",
+  val startedAtMillis: Long = 0L,
+  val elapsedSec: Long = 0L,
+  val sampleCount: Long = 0L,
+  val distanceKm: Double = 0.0,
+  val maxDpfTempC: Double = 0.0,
+  val maxCoolantC: Double = 0.0,
+  val minBatteryV: Double = 0.0,
+  val currentFuelLph: Double = 0.0,
+  val estimatedFuelLiters: Double = 0.0,
+  val avgLitersPer100Km: Double = 0.0,
+  val trafficSeconds: Long = 0L,
+  val dpfRegenDetected: Boolean = false,
+  val demoMode: Boolean = false,
+  val csvFileName: String = "",
+)
+

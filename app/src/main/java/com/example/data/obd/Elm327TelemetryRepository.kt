@@ -56,41 +56,57 @@ class Elm327TelemetryRepository(
 
   private var pollingJob: Job? = null
   private var activeDefinitions: List<ObdPidDefinition> = D16aaPidCatalog.standardPids
+  private var activeWidgetPidKeys: Set<String> = emptySet()
   private var activeCustomPids: List<CustomPidConfig> = emptyList()
   private var activeWidgetThresholds: Map<String, Pair<Double?, Double?>> = emptyMap()
+  private var commuteCorePidsRequired: Boolean = false
   private var activeTxHeader: String = DEFAULT_OBD_HEADER
   private var activeRxFilter: String = ""
 
   private val exclusiveOperationMutex = Mutex()
   private val isExclusiveOperation = MutableStateFlow(false)
 
+  fun setCommuteCorePidsRequired(required: Boolean) {
+    if (commuteCorePidsRequired == required) return
+    commuteCorePidsRequired = required
+    rebuildPollingDefinitions()
+  }
+
   fun updatePollingTargets(
     widgetPidKeys: Set<String>,
     customPids: List<CustomPidConfig>,
     thresholds: Map<String, Pair<Double?, Double?>>,
   ) {
+    activeWidgetPidKeys = widgetPidKeys
     activeCustomPids = customPids
     activeWidgetThresholds = thresholds
+    rebuildPollingDefinitions()
+    if (_connectionState.value !is ElmConnectionState.DemoMode) {
+      refreshTpmsUnconfiguredSlots()
+    }
+  }
+
+  private fun rebuildPollingDefinitions() {
     val defs = mutableListOf<ObdPidDefinition>()
 
-    val expandedKeys = widgetPidKeys.toMutableSet()
+    val expandedKeys = activeWidgetPidKeys.toMutableSet()
+    if (commuteCorePidsRequired) {
+      expandedKeys.addAll(COMMUTE_CORE_PIDS)
+    }
     if (D16aaPidCatalog.PID_BATTERY_SMART in expandedKeys) {
       expandedKeys.add("BATTERY_ECU")
       expandedKeys.add("BATTERY_ATRV")
       expandedKeys.add("RPM")
     }
     if (D16aaPidCatalog.PID_TPMS_QUAD in expandedKeys) {
-      customPids.filter { it.targetWheel.isNotBlank() }.forEach { expandedKeys.add(it.pidKey) }
+      activeCustomPids.filter { it.targetWheel.isNotBlank() }.forEach { expandedKeys.add(it.pidKey) }
     }
 
     for (key in expandedKeys) {
       if (key == D16aaPidCatalog.PID_BATTERY_SMART || key == D16aaPidCatalog.PID_TPMS_QUAD) continue
-      D16aaPidCatalog.findDefinition(key, customPids)?.let { defs.add(it) }
+      D16aaPidCatalog.findDefinition(key, activeCustomPids)?.let { defs.add(it) }
     }
     activeDefinitions = defs
-    if (_connectionState.value !is ElmConnectionState.DemoMode) {
-      refreshTpmsUnconfiguredSlots()
-    }
   }
 
   fun connectToDevice(address: String, fallbackName: String) {
@@ -160,7 +176,7 @@ class Elm327TelemetryRepository(
         supportedCommands =
           setOf(
             "ATRV", "0104", "0105", "010B", "010C", "010D", "010F",
-            "0110", "0111", "0123", "0133", "0142", "015C", "017C",
+            "0110", "0111", "0123", "0133", "0134", "0142", "015C", "017C",
           ),
         unsupportedCommands = setOf("0178"),
         ecuName = "D16AA-DEMO (Simulazione)",
@@ -184,6 +200,7 @@ class Elm327TelemetryRepository(
           val maf = (24.0 + 42.0 * (rpm / 3500.0) * (turbo / 200.0)).coerceIn(8.0, 140.0)
           val oil = (94.0 + 2.5 * sin(t * 0.06)).coerceIn(75.0, 112.0)
           val dpfTemp = (340.0 + 95.0 * sin(t * 0.14) + 60.0 * (load / 100.0)).coerceIn(220.0, 620.0)
+          val lambda = (1.98 - 0.68 * (load / 100.0)).coerceIn(1.22, 1.98)
           val bat = 14.28 + 0.08 * sin(t * 0.4)
           val baro = 100.0
           val throttle = (32.0 + 25.0 * sin(t * 0.7)).coerceIn(0.0, 100.0)
@@ -198,6 +215,7 @@ class Elm327TelemetryRepository(
           updateReading("INTAKE_TEMP", iat, AvailabilityState.ACTIVE)
           updateReading("OIL_TEMP", oil, AvailabilityState.ACTIVE)
           updateReading("EXHAUST_DPF_TEMP", dpfTemp, AvailabilityState.ACTIVE)
+          updateReading("O2_LAMBDA", lambda, AvailabilityState.ACTIVE)
           updateReading("BATTERY_ECU", bat, AvailabilityState.ACTIVE)
           updateReading("BATTERY_ATRV", bat - 0.1, AvailabilityState.ACTIVE)
           updateReading("BARO_PRESSURE", baro, AvailabilityState.ACTIVE)
@@ -1204,6 +1222,20 @@ class Elm327TelemetryRepository(
 
   private companion object {
     const val DEFAULT_OBD_HEADER = "7DF"
+    val COMMUTE_CORE_PIDS =
+      setOf(
+        "RPM",
+        "SPEED",
+        "TURBO_MAP",
+        "MAF",
+        "ENGINE_LOAD",
+        "FUEL_RAIL",
+        "O2_LAMBDA",
+        "COOLANT_TEMP",
+        "EXHAUST_DPF_TEMP",
+        "BATTERY_ECU",
+        "BATTERY_ATRV",
+      )
     val PRIORITY_SUZUKI_HEADERS =
       setOf("751", "7A0", "743", "750", "752", "753", "754", "760", "7B0", "7C0", "726", "7E1", "7E2")
   }

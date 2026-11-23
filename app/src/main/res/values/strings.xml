@@ -52,4 +52,21 @@
     <string name="cd_pid_inspector">Ispettore PID e Multi-Header CAN</string>
     <string name="cd_toggle_edit_mode">Attiva o chiudi modifica dashboard</string>
     <string name="cd_sign_out">Esci dall\'account Google</string>
+    <string name="cd_trip_logs">Storico tragitti e log CSV</string>
+
+    <string name="trip_logs_title">Log Tragitti Casa-Lavoro</string>
+    <string name="trip_logs_subtitle">Registrazione automatica OBD-II su CSV locale e riepilogo Cloud</string>
+    <string name="trip_auto_log_title">Auto-Log all\'avvio auto</string>
+    <string name="trip_auto_log_desc">Avvia la registrazione in background appena l\'ELM327 si connette e salva allo spegnimento.</string>
+    <string name="trip_start_manual">Avvia Log</string>
+    <string name="trip_stop_save">Ferma e Salva</string>
+    <string name="trip_open_history">Storico</string>
+    <string name="trip_export_csv">Esporta CSV</string>
+    <string name="trip_rename_title">Rinomina tragitto</string>
+    <string name="trip_rename_label">Nome tragitto (es. Casa -> Lavoro)</string>
+    <string name="trip_empty_title">Nessun tragitto registrato</string>
+    <string name="trip_empty_desc">Collega l\'ELM327 in auto con Auto-Log attivo oppure premi \"Avvia Log\" per registrare una sessione.</string>
+    <string name="trip_notif_channel_name">Registrazione Telemetria OBD</string>
+    <string name="trip_notif_channel_desc">Mantiene attiva la raccolta dati ELM327 in background durante il tragitto.</string>
+    <string name="trip_notif_stop_action">Ferma log</string>
 </resources>

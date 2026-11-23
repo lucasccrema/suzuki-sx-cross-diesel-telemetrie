@@ -125,5 +125,112 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(pidId);
     }
+
+    function isValidTripLog(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.title is string &&
+             data.title.size() >= 1 &&
+             data.title.size() <= 60 &&
+             data.startedAtMillis is number &&
+             data.startedAtMillis >= 0 &&
+             data.endedAtMillis is number &&
+             data.endedAtMillis >= 0 &&
+             data.durationSec is number &&
+             data.durationSec >= 0 &&
+             data.sampleCount is number &&
+             data.sampleCount >= 0 &&
+             data.distanceKm is number &&
+             data.distanceKm >= 0 &&
+             data.avgSpeedKmh is number &&
+             data.avgSpeedKmh >= 0 &&
+             data.maxSpeedKmh is number &&
+             data.maxSpeedKmh >= 0 &&
+             data.maxRpm is number &&
+             data.maxRpm >= 0 &&
+             data.maxCoolantC is number &&
+             data.maxDpfTempC is number &&
+             data.minBatteryV is number &&
+             data.minBatteryV >= 0 &&
+             data.maxBatteryV is number &&
+             data.maxBatteryV >= 0 &&
+             data.avgBatteryV is number &&
+             data.avgBatteryV >= 0 &&
+             data.maxTurboKpa is number &&
+             data.maxTurboKpa >= 0 &&
+             data.estimatedFuelLiters is number &&
+             data.estimatedFuelLiters >= 0 &&
+             data.avgLitersPer100Km is number &&
+             data.avgLitersPer100Km >= 0 &&
+             data.avgLitersPerHour is number &&
+             data.avgLitersPerHour >= 0 &&
+             data.trafficSeconds is number &&
+             data.trafficSeconds >= 0 &&
+             data.dpfRegenDetected is bool &&
+             data.dpfRegenSeconds is number &&
+             data.dpfRegenSeconds >= 0 &&
+             data.csvFileName is string &&
+             data.csvFileName.size() >= 1 &&
+             data.csvFileName.size() <= 80 &&
+             data.status is string &&
+             data.status in ['RECORDING', 'COMPLETED'] &&
+             data.demoMode is bool &&
+             data.timelinePoints is list &&
+             data.timelinePoints.size() <= 60 &&
+             (data.timelinePoints.size() == 0 || data.timelinePoints[0] is map) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    match /users/{userId}/trip_logs/{tripId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(tripId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(tripId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'title', 'startedAtMillis', 'endedAtMillis', 'durationSec',
+                         'sampleCount', 'distanceKm', 'avgSpeedKmh', 'maxSpeedKmh', 'maxRpm',
+                         'maxCoolantC', 'maxDpfTempC', 'minBatteryV', 'maxBatteryV', 'avgBatteryV',
+                         'maxTurboKpa', 'estimatedFuelLiters', 'avgLitersPer100Km',
+                         'avgLitersPerHour', 'trafficSeconds', 'dpfRegenDetected', 'dpfRegenSeconds',
+                         'csvFileName', 'status', 'demoMode', 'timelinePoints',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'title', 'startedAtMillis', 'endedAtMillis', 'durationSec',
+                         'sampleCount', 'distanceKm', 'avgSpeedKmh', 'maxSpeedKmh', 'maxRpm',
+                         'maxCoolantC', 'maxDpfTempC', 'minBatteryV', 'maxBatteryV', 'avgBatteryV',
+                         'maxTurboKpa', 'estimatedFuelLiters', 'avgLitersPer100Km',
+                         'avgLitersPerHour', 'trafficSeconds', 'dpfRegenDetected', 'dpfRegenSeconds',
+                         'csvFileName', 'status', 'demoMode', 'timelinePoints',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidTripLog(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(tripId) &&
+                       isValidTripLog(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().startedAtMillis == existing().startedAtMillis &&
+                       incoming().csvFileName == existing().csvFileName &&
+                       incoming().demoMode == existing().demoMode &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'title', 'endedAtMillis', 'durationSec', 'sampleCount', 'distanceKm',
+                         'avgSpeedKmh', 'maxSpeedKmh', 'maxRpm', 'maxCoolantC', 'maxDpfTempC',
+                         'minBatteryV', 'maxBatteryV', 'avgBatteryV', 'maxTurboKpa',
+                         'estimatedFuelLiters', 'avgLitersPer100Km', 'avgLitersPerHour',
+                         'trafficSeconds', 'dpfRegenDetected', 'dpfRegenSeconds',
+                         'status', 'timelinePoints', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(tripId);
+    }
   }
 }

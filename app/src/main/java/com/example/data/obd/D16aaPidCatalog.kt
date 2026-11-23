@@ -242,6 +242,19 @@ object D16aaPidCatalog {
         category = "Elettronica",
       ),
       ObdPidDefinition(
+        key = "O2_LAMBDA",
+        labelIt = "Rapporto Lambda O₂ (0134)",
+        shortLabel = "LAMBDA",
+        command = "0134",
+        unit = "λ",
+        minValue = 0.8,
+        maxValue = 2.0,
+        decimals = 2,
+        priority = PollingPriority.MEDIUM,
+        formula = "(A*256+B)/32768",
+        category = "Iniezione",
+      ),
+      ObdPidDefinition(
         key = PID_TPMS_QUAD,
         labelIt = "Pressione Pneumatici (TPMS)",
         shortLabel = "TPMS",
@@ -384,6 +397,44 @@ object D16aaPidCatalog {
           severity = ReadingStatus.CRITICAL,
         )
     }
+  }
+
+  /**
+   * Estimates instantaneous diesel fuel rate (L/h) using MAF (0110), wideband O2 lambda (0134),
+   * engine load (0104), and fuel cut-off indicators.
+   * Diesel stoichiometry ~14.5:1 AFR, EN590 diesel density ~835 g/L.
+   */
+  fun estimateDieselFuelRateLph(
+    mafGs: Double?,
+    lambdaEq: Double?,
+    engineLoadPct: Double?,
+    rpm: Double?,
+    speedKmh: Double?,
+    fuelRailBar: Double?,
+  ): Double? {
+    if (rpm != null && rpm < 250.0) return 0.0
+    val isOverrunCutoff =
+      rpm != null &&
+        rpm > 950.0 &&
+        speedKmh != null &&
+        speedKmh > 15.0 &&
+        engineLoadPct != null &&
+        engineLoadPct < 6.0 &&
+        (fuelRailBar == null || fuelRailBar < 380.0)
+    if (isOverrunCutoff) return 0.0
+    if (mafGs == null || mafGs <= 0.0) return null
+
+    // SAE J1979 PID 0134 saturates around 1.9999; under low-load/idle diesels run leaner (~2.5-3.8)
+    val effectiveLambda =
+      if (lambdaEq != null && lambdaEq in 0.85..1.94) {
+        lambdaEq
+      } else {
+        val loadFrac = ((engineLoadPct ?: 30.0) / 100.0).coerceIn(0.0, 1.0)
+        1.95 + (1.0 - loadFrac) * 1.9
+      }
+
+    val fuelGramsPerSec = mafGs / (effectiveLambda * 14.5)
+    return (fuelGramsPerSec * 3600.0 / 835.0).coerceAtLeast(0.0)
   }
 
   /**

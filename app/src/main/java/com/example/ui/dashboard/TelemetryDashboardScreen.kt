@@ -1,9 +1,14 @@
 package com.example.ui.dashboard
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -36,6 +41,10 @@ import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Route
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,6 +75,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.CreationExtras
@@ -73,14 +83,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.R
+import com.example.data.model.ActiveTripUiState
 import com.example.data.model.AvailabilityState
 import com.example.data.model.DashboardWidgetConfig
 import com.example.data.model.ElmConnectionState
 import com.example.data.model.ReadingStatus
-import com.example.data.obd.BluetoothSppClient
 import com.example.data.obd.D16aaPidCatalog
-import com.example.data.obd.Elm327TelemetryRepository
+import com.example.data.obd.ObdRuntime
 import com.example.data.repository.DashboardRepository
+import com.example.data.repository.TripLogRepository
 import com.example.ui.auth.signOutUser
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.BorderHairline
@@ -93,6 +104,8 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.VoidBlack
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun TelemetryDashboardRoute(
@@ -103,8 +116,8 @@ fun TelemetryDashboardRoute(
   val scope = rememberCoroutineScope()
   val credentialManager = remember(context) { CredentialManager.create(context) }
 
-  val bluetoothClient = remember(appContext) { BluetoothSppClient(appContext) }
-  val telemetryRepository = remember(bluetoothClient) { Elm327TelemetryRepository(bluetoothClient) }
+  val obdRuntime = remember(appContext) { ObdRuntime.get(appContext) }
+  val bluetoothClient = obdRuntime.bluetoothClient
 
   val viewModel: TelemetryDashboardViewModel =
     viewModel(
@@ -116,7 +129,9 @@ fun TelemetryDashboardRoute(
             val db = FirebaseFirestore.getInstance(dbId)
             TelemetryDashboardViewModel(
               dashboardRepository = DashboardRepository(db),
-              telemetryRepository = telemetryRepository,
+              tripLogRepository = TripLogRepository(db),
+              telemetryRepository = obdRuntime.telemetryRepository,
+              tripLogManager = obdRuntime.tripLogManager,
               currentUserId = currentUserId,
             )
           }
@@ -140,12 +155,39 @@ fun TelemetryDashboardRoute(
   val isProbing by viewModel.isProbing.collectAsStateWithLifecycle()
   val bcmScanState by viewModel.bcmScanState.collectAsStateWithLifecycle()
   val statusBannerMessage by viewModel.statusBannerMessage.collectAsStateWithLifecycle()
+  val activeTripState by viewModel.activeTripState.collectAsStateWithLifecycle()
+  val autoLogEnabled by viewModel.autoLogEnabled.collectAsStateWithLifecycle()
+  val tripLogs by viewModel.tripLogs.collectAsStateWithLifecycle()
 
   var showConnectionSheet by remember { mutableStateOf(false) }
   var showWidgetCatalog by remember { mutableStateOf(false) }
   var showPidInspector by remember { mutableStateOf(false) }
+  var showTripLogs by remember { mutableStateOf(false) }
   var showCreateProfile by remember { mutableStateOf(false) }
   var editingWidget by remember { mutableStateOf<DashboardWidgetConfig?>(null) }
+  var askedNotificationPerm by remember { mutableStateOf(false) }
+
+  val notificationPermLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+      // Non-blocking: foreground service works even if user declines notification visibility
+    }
+
+  LaunchedEffect(activeTripState.isRecording, activeTripState.demoMode) {
+    if (
+      activeTripState.isRecording &&
+        !activeTripState.demoMode &&
+        !askedNotificationPerm &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    ) {
+      val granted =
+        ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) ==
+          PackageManager.PERMISSION_GRANTED
+      if (!granted) {
+        askedNotificationPerm = true
+        notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+      }
+    }
+  }
 
   val snackbarHostState = remember { SnackbarHostState() }
   LaunchedEffect(statusBannerMessage) {
@@ -187,15 +229,19 @@ fun TelemetryDashboardRoute(
       DashboardTopBar(
         connectionState = connectionState,
         isEditMode = isEditMode,
+        isRecordingTrip = activeTripState.isRecording,
         onOpenConnection = {
           viewModel.refreshBondedDevices()
           showConnectionSheet = true
         },
+        onOpenTripLogs = { showTripLogs = true },
         onOpenInspector = { showPidInspector = true },
         onToggleEditMode = { viewModel.toggleEditMode() },
         onSignOut = {
-          viewModel.disconnectElm()
-          signOutUser(credentialManager, scope)
+          scope.launch {
+            viewModel.prepareForSignOut()
+            signOutUser(credentialManager, scope)
+          }
         },
       )
 
@@ -243,6 +289,33 @@ fun TelemetryDashboardRoute(
           }
         }
       }
+
+      CommuteLoggerBanner(
+        activeTrip = activeTripState,
+        autoLogEnabled = autoLogEnabled,
+        savedCount = tripLogs.size,
+        canManualStart =
+          connectionState is ElmConnectionState.Connected ||
+            connectionState is ElmConnectionState.DemoMode,
+        onStartManual = {
+          if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+              connectionState is ElmConnectionState.Connected
+          ) {
+            val granted =
+              ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.POST_NOTIFICATIONS,
+              ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+              notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+          }
+          viewModel.startCommuteLog()
+        },
+        onStopTrip = { viewModel.stopCommuteLog() },
+        onOpenHistory = { showTripLogs = true },
+      )
 
       // Active Alert Banner (only shown for genuine active warning/critical readings)
       val activeAlerts =
@@ -424,6 +497,23 @@ fun TelemetryDashboardRoute(
     )
   }
 
+  if (showTripLogs) {
+    TripLogsSheet(
+      trips = tripLogs,
+      activeTrip = activeTripState,
+      autoLogEnabled = autoLogEnabled,
+      canManualStart =
+        connectionState is ElmConnectionState.Connected ||
+          connectionState is ElmConnectionState.DemoMode,
+      onToggleAutoLog = { viewModel.toggleAutoLog(it) },
+      onStartManual = { viewModel.startCommuteLog() },
+      onStopTrip = { viewModel.stopCommuteLog() },
+      onRenameTrip = { tripId, newTitle -> viewModel.renameTripLog(tripId, newTitle) },
+      onDeleteTrip = { trip -> viewModel.deleteTripLog(context, trip) },
+      onDismiss = { showTripLogs = false },
+    )
+  }
+
   editingWidget?.let { w ->
     WidgetConfigDialog(
       widget = w,
@@ -437,10 +527,159 @@ fun TelemetryDashboardRoute(
 }
 
 @Composable
+private fun CommuteLoggerBanner(
+  activeTrip: ActiveTripUiState,
+  autoLogEnabled: Boolean,
+  savedCount: Int,
+  canManualStart: Boolean,
+  onStartManual: () -> Unit,
+  onStopTrip: () -> Unit,
+  onOpenHistory: () -> Unit,
+) {
+  val borderColor =
+    if (activeTrip.isRecording) EmeraldOptimal.copy(alpha = 0.55f) else BorderHairline
+  val bgColor =
+    if (activeTrip.isRecording) EmeraldOptimal.copy(alpha = 0.10f) else SurfaceGraphite
+
+  Surface(
+    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenHistory).testTag("commute_logger_banner"),
+    shape = MaterialTheme.shapes.small,
+    color = bgColor,
+    border = BorderStroke(1.dp, borderColor),
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Row(
+        modifier = Modifier.weight(1f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Icon(
+          imageVector =
+            if (activeTrip.isRecording) Icons.Rounded.FiberManualRecord else Icons.Rounded.Route,
+          contentDescription = null,
+          tint =
+            if (activeTrip.isRecording) CoralCritical
+            else if (autoLogEnabled) CyanPrimary
+            else TextMuted,
+          modifier = Modifier.size(if (activeTrip.isRecording) 12.dp else 18.dp),
+        )
+        Column {
+          if (activeTrip.isRecording) {
+            val fuelSnippet =
+              if (activeTrip.avgLitersPer100Km > 0.0) {
+                String.format(Locale.ITALY, " · %.1f L/100", activeTrip.avgLitersPer100Km)
+              } else {
+                String.format(Locale.ITALY, " · %.1f L/h", activeTrip.currentFuelLph)
+              }
+            Text(
+              text =
+                String.format(
+                  Locale.ITALY,
+                  "REC · %s · %.1f km%s",
+                  formatDuration(activeTrip.elapsedSec),
+                  activeTrip.distanceKm,
+                  fuelSnippet,
+                ),
+              style = MaterialTheme.typography.labelLarge,
+              color = EmeraldOptimal,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+            val regenNote = if (activeTrip.dpfRegenDetected) " · RIGENERAZIONE DPF!" else ""
+            Text(
+              text =
+                String.format(
+                  Locale.ITALY,
+                  "Coda %s · DPF %.0f°C · %d camp.%s",
+                  formatDuration(activeTrip.trafficSeconds),
+                  activeTrip.maxDpfTempC,
+                  activeTrip.sampleCount,
+                  regenNote,
+                ),
+              style = MaterialTheme.typography.labelSmall,
+              color = if (activeTrip.dpfRegenDetected) AmberWarning else TextSecondary,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          } else {
+            Text(
+              text =
+                "Log Casa-Lavoro · " +
+                  if (autoLogEnabled) "Auto-Log ON" else "Auto-Log OFF",
+              style = MaterialTheme.typography.labelLarge,
+              color = MaterialTheme.colorScheme.onSurface,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+              text =
+                if (savedCount == 0) "Nessun tragitto salvato · tocca per configurare"
+                else "$savedCount tragitti salvati · esporta CSV o vedi grafici",
+              style = MaterialTheme.typography.labelSmall,
+              color = TextSecondary,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+        }
+      }
+
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+      ) {
+        if (activeTrip.isRecording) {
+          TextButton(
+            onClick = onStopTrip,
+            modifier = Modifier.testTag("stop_trip_button"),
+          ) {
+            Icon(
+              Icons.Rounded.Stop,
+              contentDescription = null,
+              tint = CoralCritical,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(4.dp))
+            Text(stringResource(R.string.trip_stop_save), color = CoralCritical)
+          }
+        } else if (canManualStart) {
+          TextButton(
+            onClick = onStartManual,
+            modifier = Modifier.testTag("start_trip_button"),
+          ) {
+            Icon(
+              Icons.Rounded.PlayArrow,
+              contentDescription = null,
+              tint = CyanPrimary,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.size(2.dp))
+            Text(stringResource(R.string.trip_start_manual), color = CyanPrimary)
+          }
+        } else {
+          TextButton(
+            onClick = onOpenHistory,
+            modifier = Modifier.testTag("open_trip_history_button"),
+          ) {
+            Text(stringResource(R.string.trip_open_history), color = CyanPrimary)
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
 private fun DashboardTopBar(
   connectionState: ElmConnectionState,
   isEditMode: Boolean,
+  isRecordingTrip: Boolean,
   onOpenConnection: () -> Unit,
+  onOpenTripLogs: () -> Unit,
   onOpenInspector: () -> Unit,
   onToggleEditMode: () -> Unit,
   onSignOut: () -> Unit,
@@ -509,6 +748,16 @@ private fun DashboardTopBar(
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
+      IconButton(
+        onClick = onOpenTripLogs,
+        modifier = Modifier.testTag("trip_logs_button"),
+      ) {
+        Icon(
+          imageVector = Icons.Rounded.Route,
+          contentDescription = stringResource(R.string.cd_trip_logs),
+          tint = if (isRecordingTrip) EmeraldOptimal else TextSecondary,
+        )
+      }
       IconButton(
         onClick = onOpenInspector,
         modifier = Modifier.testTag("pid_inspector_button"),

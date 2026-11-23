@@ -104,6 +104,158 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "TripLog": {
+      "title": "TripLog",
+      "description": "Recorded daily commute OBD-II telemetry session summary and downsampled timeline.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID of the trip owner."
+        },
+        "title": {
+          "type": "string",
+          "description": "Commute session title (1 to 60 chars)."
+        },
+        "startedAtMillis": {
+          "type": "number",
+          "description": "Epoch milliseconds when recording began."
+        },
+        "endedAtMillis": {
+          "type": "number",
+          "description": "Epoch milliseconds when recording stopped (0 while active)."
+        },
+        "durationSec": {
+          "type": "number",
+          "description": "Recorded trip duration in seconds."
+        },
+        "sampleCount": {
+          "type": "number",
+          "description": "Number of logged CSV telemetry samples."
+        },
+        "distanceKm": {
+          "type": "number",
+          "description": "Estimated distance in kilometers integrated from vehicle speed."
+        },
+        "avgSpeedKmh": {
+          "type": "number",
+          "description": "Average speed in km/h."
+        },
+        "maxSpeedKmh": {
+          "type": "number",
+          "description": "Maximum speed in km/h."
+        },
+        "maxRpm": {
+          "type": "number",
+          "description": "Peak engine RPM."
+        },
+        "maxCoolantC": {
+          "type": "number",
+          "description": "Peak coolant temperature in Celsius."
+        },
+        "maxDpfTempC": {
+          "type": "number",
+          "description": "Peak DPF/exhaust temperature in Celsius."
+        },
+        "minBatteryV": {
+          "type": "number",
+          "description": "Minimum recorded battery/OBD voltage."
+        },
+        "maxBatteryV": {
+          "type": "number",
+          "description": "Maximum recorded battery/OBD voltage."
+        },
+        "avgBatteryV": {
+          "type": "number",
+          "description": "Average recorded battery/OBD voltage."
+        },
+        "maxTurboKpa": {
+          "type": "number",
+          "description": "Peak turbo/MAP pressure in kPa."
+        },
+        "estimatedFuelLiters": {
+          "type": "number",
+          "description": "Estimated diesel consumed in liters during the trip."
+        },
+        "avgLitersPer100Km": {
+          "type": "number",
+          "description": "Average estimated consumption in L/100 km."
+        },
+        "avgLitersPerHour": {
+          "type": "number",
+          "description": "Average estimated fuel rate in L/h."
+        },
+        "trafficSeconds": {
+          "type": "number",
+          "description": "Seconds spent idling or in stop-and-go queue (< 10 km/h with engine running)."
+        },
+        "dpfRegenDetected": {
+          "type": "boolean",
+          "description": "Whether DPF active regeneration temperature (>= 500 C) was detected."
+        },
+        "dpfRegenSeconds": {
+          "type": "number",
+          "description": "Seconds spent at active DPF regeneration temperatures (>= 500 C)."
+        },
+        "csvFileName": {
+          "type": "string",
+          "description": "Local CSV filename generated for this commute."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["RECORDING", "COMPLETED"],
+          "description": "Lifecycle status of the trip log."
+        },
+        "demoMode": {
+          "type": "boolean",
+          "description": "Whether the trip was recorded using the Demo simulator."
+        },
+        "timelinePoints": {
+          "type": "array",
+          "description": "Downsampled telemetry timeline points (up to 60 points)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "startedAtMillis",
+        "endedAtMillis",
+        "durationSec",
+        "sampleCount",
+        "distanceKm",
+        "avgSpeedKmh",
+        "maxSpeedKmh",
+        "maxRpm",
+        "maxCoolantC",
+        "maxDpfTempC",
+        "minBatteryV",
+        "maxBatteryV",
+        "avgBatteryV",
+        "maxTurboKpa",
+        "estimatedFuelLiters",
+        "avgLitersPer100Km",
+        "avgLitersPerHour",
+        "trafficSeconds",
+        "dpfRegenDetected",
+        "dpfRegenSeconds",
+        "csvFileName",
+        "status",
+        "demoMode",
+        "timelinePoints",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -118,6 +270,12 @@
         "$ref": "#/entities/CustomPidConfig"
       },
       "description": "User-owned custom OBD-II/UDS CAN PIDs and TPMS wheel bindings."
+    },
+    "/users/{userId}/trip_logs/{tripId}": {
+      "schema": {
+        "$ref": "#/entities/TripLog"
+      },
+      "description": "User-owned daily commute OBD-II telemetry trip logs."
     }
   }
 }

@@ -51,15 +51,24 @@ Con motore avviato (~800 rpm), un bus CAN reale trasmette centinaia di pacchetti
 
 ---
 
-## 4. Strumenti diagnostici pronti nell'app (per il prossimo adattatore)
+Ultima revisione: **2026-11-23**
+
+## 4. Strumenti diagnostici & Log Tragitti pronti nell'app
 Dentro **Ispettore PID & Multi-Header CAN** (`ConnectionAndPidSheets.kt` / `Elm327TelemetryRepository.kt`):
 - **`Cerca moduli BCM / TPMS`**: interroga `ATI`/`AT@1`, `7E0` (`0902`, `1003`, `22xxxx`), broadcast `7DF`, sweep fisico 11-bit (`710..7E7`), indirizzamento esteso Suzuki (`ATCEA`), 29-bit (`ATSP7`) e sniff passivo breve `ATMA`.
 - **`Intercetta Menu TPMS (Auto ferma)`**: ascolto dedicato in 4 fasi (`700..7FF` per 3,5 s, `400..7FF` per 2 s, `000..7FF` per 250 ms, probe attivi a menu aperto) mentre si apre la voce TPMS sul cruscotto con l'astina.
 - **`Copia Report Scansione`**: esporta tutto negli appunti in un tocco.
 
+Nuova funzione **Log Tragitti Casa-Lavoro** (`TripLogManager.kt`, `TelemetryLoggingService.kt`, `TripCsvStorage.kt`, `TripLogsSheet.kt`):
+- **Auto-Log alla connessione ELM327** (disattivabile da storico) + avvio/arresto manuale su connessione attiva o Simulatore Demo.
+- **Servizio in Foreground (`connectedDevice`)**: mantiene viva la connessione Bluetooth e la scrittura CSV anche a schermo spento o con Google Maps / Waze in primo piano.
+- **Analisi consumi, code e DPF**: stima flusso gasolio (`L/h`, `L/100 km`, litri totali) combinando `MAF (0110)` + `Lambda O₂ (0134)` + `Carico (0104)` + rilevamento cut-off; conteggio tempo perso in coda (`< 10 km/h`) e rilevamento automatico rigenerazioni DPF (`017C ≥ 500 °C`).
+- **Doppia persistenza**: CSV ad alta risoluzione (~1,8 s, 15 colonne) salvato localmente ed esportabile/condivisibile (`FileProvider`), + riepilogo e grafico 4 tracce sincronizzati su Cloud Firestore (`/users/{userId}/trip_logs/{tripId}`).
+
 ---
 
 ## 5. Checklist Prossimi Passi
+- [x] **Log continuo tragitti casa-lavoro** implementato (CSV locale + Cloud Firestore + Foreground Service + storico e grafici).
 - [ ] **Sostituire il dongle `v2.1` con un adattatore compatibile completo (Bluetooth Classic per Android):**
   - Verificare che sia **Bluetooth (2.0/3.0 Classic o dual-mode)** — **NON solo Wi-Fi** (es. evitare modelli con `SSID: WiFi OBDII` / `Port: 35000`) e **NON solo BLE iOS**.
   - Opzione economica: **ELM327 `V1.5` con chip reale `PIC18F25K80`** dichiarato, acquistato con reso gratuito e verificato subito con *ELM327 Identifier* (verde fino a `v1.4/v1.5`) o col nostro report `ATMA`.

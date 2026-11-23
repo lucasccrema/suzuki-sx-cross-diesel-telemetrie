@@ -1,8 +1,10 @@
 package com.example.ui.dashboard
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.ActiveTripUiState
 import com.example.data.model.BatteryStatusSummary
 import com.example.data.model.BcmScanEntry
 import com.example.data.model.BcmScanState
@@ -16,11 +18,15 @@ import com.example.data.model.PidProbeResult
 import com.example.data.model.SupportedPidSnapshot
 import com.example.data.model.TelemetryReading
 import com.example.data.model.TpmsWheelReading
+import com.example.data.model.TripLogEntry
 import com.example.data.model.WheelPosition
 import com.example.data.model.WidgetStyle
 import com.example.data.obd.D16aaPidCatalog
 import com.example.data.obd.Elm327TelemetryRepository
+import com.example.data.obd.TripCsvStorage
+import com.example.data.obd.TripLogManager
 import com.example.data.repository.DashboardRepository
+import com.example.data.repository.TripLogRepository
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.util.Locale
 import java.util.UUID
@@ -47,7 +53,9 @@ sealed interface DashboardsUiState {
 
 class TelemetryDashboardViewModel(
   private val dashboardRepository: DashboardRepository,
+  private val tripLogRepository: TripLogRepository,
   private val telemetryRepository: Elm327TelemetryRepository,
+  private val tripLogManager: TripLogManager,
   private val currentUserId: String,
 ) : ViewModel() {
 
@@ -135,12 +143,45 @@ class TelemetryDashboardViewModel(
   val elmLogs: StateFlow<List<ElmLogEntry>> = telemetryRepository.bluetoothClient.logs
   val bcmScanState: StateFlow<BcmScanState> = telemetryRepository.bcmScanState
 
+  val activeTripState: StateFlow<ActiveTripUiState> = tripLogManager.activeTripState
+  val autoLogEnabled: StateFlow<Boolean> = tripLogManager.autoLogEnabled
+
+  val tripLogs: StateFlow<List<TripLogEntry>> =
+    tripLogRepository
+      .observeTrips(currentUserId)
+      .catch { error ->
+        val firestoreError =
+          generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+        if (firestoreError == null && error is CancellationException) throw error
+        Log.w(TAG, "Error observing trip logs", firestoreError ?: error)
+        emit(emptyList())
+      }
+      .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = emptyList(),
+      )
+
   init {
+    tripLogManager.attachSession(currentUserId, tripLogRepository)
+
     viewModelScope.launch {
       runCatching { dashboardRepository.ensureDefaultDashboards(currentUserId) }
         .onFailure { Log.w(TAG, "Failed to initialize default dashboards", it) }
     }
     refreshBondedDevices()
+
+    // Surface TripLogManager save/disconnect messages in the dashboard snackbar
+    viewModelScope.launch {
+      tripLogManager.lastFeedbackMessage.collect { msg ->
+        if (msg != null) {
+          _statusBannerMessage.value = msg
+          tripLogManager.clearFeedbackMessage()
+        }
+      }
+    }
 
     // Keep ELM327 polling loop aligned with active dashboard widgets and custom PIDs
     viewModelScope.launch {
@@ -507,6 +548,48 @@ class TelemetryDashboardViewModel(
 
   fun clearElmLogs() {
     telemetryRepository.bluetoothClient.clearLogs()
+  }
+
+  fun toggleAutoLog(enabled: Boolean) {
+    tripLogManager.setAutoLogEnabled(enabled)
+  }
+
+  fun startCommuteLog() {
+    tripLogManager.startManualTrip()
+  }
+
+  fun stopCommuteLog() {
+    tripLogManager.stopTripAsync()
+  }
+
+  fun renameTripLog(tripId: String, newTitle: String) {
+    viewModelScope.launch {
+      tripLogRepository
+        .renameTrip(currentUserId, tripId, newTitle)
+        .onSuccess { _statusBannerMessage.value = "Titolo tragitto aggiornato." }
+        .onFailure {
+          _statusBannerMessage.value = it.localizedMessage ?: "Errore rinomina tragitto"
+        }
+    }
+  }
+
+  fun deleteTripLog(context: Context, trip: TripLogEntry) {
+    viewModelScope.launch {
+      tripLogRepository
+        .deleteTrip(currentUserId, trip.id)
+        .onSuccess {
+          TripCsvStorage.deleteCsvFile(context, trip.csvFileName)
+          _statusBannerMessage.value = "Tragitto eliminato."
+        }
+        .onFailure {
+          _statusBannerMessage.value = it.localizedMessage ?: "Errore eliminazione tragitto"
+        }
+    }
+  }
+
+  suspend fun prepareForSignOut() {
+    tripLogManager.detachAndFlushBeforeSignOut()
+    telemetryRepository.disconnect()
   }
 
   override fun onCleared() {
